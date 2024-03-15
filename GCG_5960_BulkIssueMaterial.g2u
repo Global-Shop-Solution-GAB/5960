@@ -1,0 +1,317 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.Form..Create(BaseForm)
+Gui.Form..Caption("GCG 5960 - Mass Issue Material to WIP Bins")
+Gui.Form..Size(615,135)
+Gui.Form..MinX(0)
+Gui.Form..MinY(0)
+Gui.Form..Position(0,0)
+Gui.Form..AlwaysOnTop(False)
+Gui.Form..FontName("Tahoma")
+Gui.Form..FontSize(8.25)
+Gui.Form..ControlBox(True)
+Gui.Form..MaxButton(True)
+Gui.Form..MinButton(True)
+Gui.Form..MousePointer(0)
+Gui.Form..Moveable(True)
+Gui.Form..Sizeable(True)
+Gui.Form..ShowInTaskBar(True)
+Gui.Form..TitleBar(True)
+Gui.Form..Event(UnLoad,Form_UnLoad)
+Gui.Form.lbl1.Create(Label,"Browse for a spreadsheet:",True,128,13,0,24,12,True,0,"Tahoma",8.25,,0,0)
+Gui.Form.lbl1.BorderStyle(0)
+Gui.Form.txtFilePath.Create(TextBox,"",True,550,20,0,21,36,False,0,"Tahoma",8.25,,1)
+Gui.Form.cmdBrowse.Create(Button)
+Gui.Form.cmdBrowse.Enabled(True)
+Gui.Form.cmdBrowse.Visible(True)
+Gui.Form.cmdBrowse.Zorder(0)
+Gui.Form.cmdBrowse.Size(26,23)
+Gui.Form.cmdBrowse.Position(574,35)
+Gui.Form.cmdBrowse.Caption("^")
+Gui.Form.cmdBrowse.FontName("Tahoma")
+Gui.Form.cmdBrowse.FontSize(8.25)
+Gui.Form.cmdBrowse.Event(Click,cmdBrowse_Click)
+Gui.Form.cmdProcess.Create(Button)
+Gui.Form.cmdProcess.Enabled(True)
+Gui.Form.cmdProcess.Visible(True)
+Gui.Form.cmdProcess.Zorder(0)
+Gui.Form.cmdProcess.Size(75,23)
+Gui.Form.cmdProcess.Position(249,69)
+Gui.Form.cmdProcess.Caption("Process")
+Gui.Form.cmdProcess.FontName("Tahoma")
+Gui.Form.cmdProcess.FontSize(8.25)
+Gui.Form.cmdProcess.Event(Click,cmdProcess_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+Program.External.Include.Library("450100.lib")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+gui.Form..Show
+Program.Sub.Main.End
+
+Program.Sub.cmdProcess_Click.Start
+	v.Local.bExcel.Declare(Boolean)
+	v.Local.sWorksheetEnum.Declare(String)
+	v.Local.iRowCount.Declare(Long)
+	v.Local.sRow.Declare(String)
+	v.Local.iCnt.Declare(Long,2)
+	v.Local.iCnt2.Declare(Long)
+	v.Local.iCnt3.Declare(Long)
+	v.Local.sTargetFile.Declare(String)
+	v.Local.sPart.Declare(String)
+	v.Local.sRev.Declare(String)
+	v.Local.sLocation.Declare(string)
+	v.Local.sQty.Declare(string)
+	v.Local.sLot.Declare(string)
+	v.Local.sBin.Declare(string)
+	v.Local.sHeat.Declare(string)
+	v.Local.sSerial.Declare(string)
+	v.Local.sWONumber.Declare(string)
+	v.Local.sWOSuffix.Declare(string)
+	v.Local.sWOSeq.Declare(string)
+	v.Local.sSQL.Declare(String)
+	v.Local.sFilter.Declare(String)
+	v.Local.fQtyToIssue.Declare(Float)
+	v.Local.fQtyIssued.Declare(Float)
+	v.local.sQtyToIssue.Declare(String)
+	v.Local.sRet.Declare(String)
+	v.Local.sMsg.declare(String)
+	v.Local.sReportFile.Declare(String)
+	v.Local.sDate.Declare(String)
+	v.Local.sTime.Declare(String)
+	
+	v.local.sTempAle.Declare(String)
+	
+	v.Local.sPartList.Declare(String)
+	
+	f.Intrinsic.Control.Try
+		'Check for Excel installation
+		f.Automation.MSExcel.CheckPresence(v.Local.bExcel)
+		f.Intrinsic.Control.If(v.Local.bExcel,=,False)
+			f.Intrinsic.ui.Msgbox("Excel must be installed for this program to run","Error >> Excel")
+			f.Intrinsic.Control.End
+		f.Intrinsic.Control.EndIf
+		
+		'Clear the 450100 datatable from past runs
+		f.Data.DataTable.DeleteRow("450100")
+		
+		'Copy the file to a new location for writing
+		f.Intrinsic.String.Build("{0}\GCG_5940_MassIssue.xlsx",v.Caller.LocalGSSTempDir,v.Local.sTargetFile)
+		f.Intrinsic.File.CopyOpenFile(v.Screen.Form!txtFilePath.Text,v.Local.sTargetFile)
+		
+		'Set the file path for the report that is to be generated at the end of this process
+		f.Intrinsic.String.DateString(v.Ambient.Date,v.Local.sDate)
+		f.Intrinsic.String.TimeString(v.Ambient.Time,v.Local.sTime)
+		f.Intrinsic.String.Build("{0}GCG_5940_IssueMaterialReport_{1}{2}.csv",v.Caller.LocalGSSTempDir,v.Local.sDate,v.Local.sTime,v.Local.sReportFile)
+		
+		'Create Excel objects
+		f.Automation.MSExcel.CreateAppObject("xlApp")
+		f.Automation.MSExcel.OpenWorkbook("xlApp","xlWB",v.Screen.Form!txtFilePath.Text)
+		f.Automation.MSExcel.EnumerateWorksheets("xlWB",v.Local.sWorksheetEnum)
+		f.Intrinsic.String.Split(v.Local.sWorksheetEnum,"*!*",v.Local.sWorksheetEnum)
+		f.Automation.MSExcel.OpenWorksheet("xlWB","xlWS",1)
+		
+		f.Intrinsic.UI.InvokeWaitDialog("Processing queries...","GCG 5960 - Please Wait")
+		
+		'Get the open job data joined to lot/bin records
+		f.ODBC.Connection!con.opencompanyconnection
+		
+		f.Data.DataTable.CreateFromSQL("dtJobSeqs","con","select job, suffix, seq, rtrim(part) as Part, hours_estimated-hours_actual as QtyReq from v_job_operations where lmo='M' and hours_estimated-hours_actual > 0")
+		
+		f.Data.DataTable.CreateFromSQL("dtItemMaster","con","select rtrim(part) as Part, rtrim(left(part,17)) as Part_Split, rtrim(if(length(part)>17,substring(rtrim(part),18,3),'')) as Rev, location, lot, rtrim(bin) as Bin, heat, serial_number, quantity from v_item_master where quantity > 0")
+		f.Data.DataTable.CreateFromSQL("dtPOLines","con","select job, suffix, sequence, sum(qty_received) as QtyRecvd from v_po_lines where qty_received > 0 and job<>'' and sequence<>'' group by job, suffix, sequence")
+		
+		f.Data.DataView.Create("dtJobSeqs","dvJobSeqs",22)
+		f.Data.DataView.Create("dtItemMaster","dvItemMaster",22)
+		f.Data.DataView.Create("dtPOLines","dvPOLines",22)
+		
+		f.Data.Datatable.AddColumn("dtJobSeqs", "keyCol", "Long")
+		f.Data.Datatable.SetSeries("dtJobSeqs", "keyCol", 0, 1)
+		
+		f.Data.Datatable.AddColumn("dtItemMaster", "keyCol", "Long")
+		f.Data.Datatable.SetSeries("dtItemMaster", "keyCol", 0, 1)
+		
+		f.Data.Datatable.AddColumn("dtPOLines", "keyCol", "Long")
+		f.Data.Datatable.SetSeries("dtPOLines", "keyCol", 0, 1)
+		
+		'Set up the results dt
+		f.Data.DataTable.Create("dtResults")
+		f.data.DataTable.AddColumn("dtResults","Job","string")
+		f.data.DataTable.AddColumn("dtResults","Suffix","string")
+		f.data.DataTable.AddColumn("dtResults","Seq","string")
+		f.data.DataTable.AddColumn("dtResults","Part","string")
+		f.data.DataTable.AddColumn("dtResults","Location","string")
+		f.data.DataTable.AddColumn("dtResults","Qty","string")
+		f.data.DataTable.AddColumn("dtResults","Lot","string")
+		f.data.DataTable.AddColumn("dtResults","Bin","string")
+		f.data.DataTable.AddColumn("dtResults","Heat","string")
+		f.data.DataTable.AddColumn("dtResults","Serial","string")
+		f.data.DataTable.AddColumn("dtResults","WIPBin","string")
+		f.data.DataTable.AddColumn("dtResults","Errors","string")
+		
+		'Iterate through spreadsheet rows
+		f.Automation.MSExcel.RowCount("xlWS",v.Local.iRowCount)
+		
+		'Start at row 2 since the first row contains titles
+		f.Intrinsic.Control.For(v.Local.iCnt,2,v.Local.iRowCount,1)
+			f.Intrinsic.String.Build("Processing rows: {0} of {1}",v.Local.iCnt,v.Local.iRowCount,v.Local.sMsg)
+			f.Intrinsic.UI.ChangeWaitStatus(v.Local.sMsg,v.Local.iCnt,2,v.Local.iRowCount)
+			f.Automation.MSExcel.ReadRow("xlWS",v.Local.iCnt,1,3,v.Local.sRow)
+			'File layout expected:
+			'JOB	|	BIN		|	WIP BIN
+			f.Intrinsic.String.Split(v.Local.sRow,"*!*",v.Local.sRow)
+
+			'Filter by the job
+			f.Intrinsic.String.Build("Job='{0}' and QtyReq>0",v.Local.sRow(0),v.Local.sFilter)
+			f.Data.dataview.SetFilter("dtJobSeqs","dvJobSeqs",v.Local.sFilter)
+			
+			f.Intrinsic.String.Build("select job, suffix, seq, rtrim(part) as Part, hours_estimated-hours_actual as QtyReq from v_job_operations where job = '{1}' and lmo='M' and hours_estimated-hours_actual > 0 and Part in (Select distinct part from v_item_master where bin = '{0}' and Quantity > 0)", v.Local.sRow(1), v.Local.sRow(0), v.Local.sSQL)
+			f.Data.Datatable.CreateFromSQL("testAleDT", "con", v.Local.sSQL, True)
+		
+			f.Intrinsic.String.Build("select job, suffix, seq, rtrim(part) as Part, hours_estimated-hours_actual as QtyReq from v_job_operations where job = '{0}' and lmo='M'", v.Local.sRow(0), v.Local.sSQL)
+			f.Data.Datatable.CreateFromSQL("testJOAleDT", "con", v.Local.sSQL, True)
+			
+			v.local.sTempAle.Set(v.DataTable.testAleDT.RowCount)
+			
+			v.Local.sWONumber.Set(v.Local.sRow(0))
+			v.Local.sBin.Set(v.Local.sRow(1))
+					
+			f.Intrinsic.Control.If(v.DataTable.testAleDT.RowCount, >, 0)		
+				'Loop Trough the list.
+				f.Intrinsic.Control.For(v.Local.iCnt2, 0, v.DataTable.testAleDT.RowCount--, 1)
+					'Filter Item Qty for MRP
+					f.Intrinsic.String.Build("Part = '{0}' and Bin = '{1}' and Quantity > 0", v.DataTable.testAleDT(v.Local.iCnt2).Part!FieldValTrim, v.Local.sRow(1).trim, v.Local.sFilter)
+					f.Data.DataView.SetFilter("dtItemMaster","dvItemMaster",v.Local.sFilter)
+					'Filter PO lines by JSS
+					f.Intrinsic.String.Build("Job='{0}' and Suffix='{1}' and Sequence='{2}' and QtyRecvd > 0", v.Local.sWONumber.Trim, v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldValTrim, v.DataTable.testAleDT(v.Local.iCnt2).seq!FieldValTrim, v.Local.sFilter)
+					f.Data.DataView.setfilter("dtPOLines","dvPOLines",v.Local.sFilter)
+										
+					f.Intrinsic.Control.If(v.DataView.dtPOLines!dvPOLines.RowCount,>,0)
+						v.Local.iCnt3.set(0)
+						f.Intrinsic.Control.For(v.Local.iCnt3,0,v.DataView.dtItemMaster!dvItemMaster.RowCount--,1)
+							'Set the amount available to issue --> Qty Recvd vs Qty On Hand (smallest value between the two of them)
+							f.Intrinsic.Control.If(v.DataView.dtPOLines!dvPOLines(0).QtyRecvd!FieldValFloat,>,v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).Quantity!FieldVal)
+								v.Local.fQtyToIssue.Set(v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Quantity!FieldVal)
+							f.Intrinsic.Control.Else
+								v.Local.fQtyToIssue.Set(v.datatable.dtPOLines(v.DataView.dtPOLines!dvPOLines(0).datatableindex).QtyRecvd!FieldValFloat)
+							f.Intrinsic.Control.EndIf
+			'***************				
+							'Set the qty to issue to the job --> QtyToIssue vs JSS Open Qty
+							f.Intrinsic.Control.If(v.Local.fQtyToIssue , >, v.DataTable.testAleDT(v.Local.iCnt2).QtyReq!FieldVal)
+								v.Local.fQtyToIssue.Set(v.DataTable.testAleDT(v.Local.iCnt2).QtyReq!FieldVal)	
+							f.Intrinsic.Control.EndIf
+							
+							'Format the quantity string --> Must pass a decimal point to the callwrapper to prevent having to multiply by 10000 to issue the correct qty
+							f.Intrinsic.String.Format(v.Local.fQtyToIssue,"#0.0#",v.Local.sQtyToIssue)
+							
+							'Add the lot/bin records to the 450100 datatable
+							f.Data.DataTable.AddRow("450100","Part",v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Part_Split!FieldVal, "Rev", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Rev!FieldVal, "Location", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Location!FieldVal, "Quantity", v.Local.sQtyToIssue, "Lot", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Lot!FieldVal, "Bin", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Bin!FieldVal, "Heat", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Heat!FieldVal, "Serial", v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Serial_Number!FieldVal, "WONumber", v.DataTable.testAleDT(v.Local.iCnt2).Job!FieldVal, "WOSuffix", v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldVal, "WOSeq", v.DataTable.testAleDT(v.Local.iCnt2).Seq!FieldVal)
+							
+							v.Local.sPart.Set(v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Part!FieldVal)
+							
+							
+							f.Intrinsic.Control.If(v.Local.sPart, =, "")
+							f.Intrinsic.Control.Else
+								f.Intrinsic.Control.If(v.Local.sPartList.Trim, =, "")
+									f.Intrinsic.String.Build("'{0}'", v.Local.sPart, v.Local.sPartList)
+								f.Intrinsic.Control.Else
+									f.Intrinsic.String.Build("{0},'{1}'", v.Local.sPartList, v.Local.sPart, v.Local.sPartList)
+								f.Intrinsic.Control.EndIf
+							f.Intrinsic.Control.EndIf
+															
+							v.Local.sPart.Set("")
+							f.Data.DataTable.AddRow("dtResults","Job", v.DataTable.testAleDT(v.Local.iCnt2).Job!FieldVal, "Suffix", v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldVal, "Seq", v.DataTable.testAleDT(v.Local.iCnt2).Seq!FieldVal, "Part", v.DataTable.testAleDT(v.Local.iCnt2).Part!FieldVal, "Location","","Qty",v.Local.fQtyToIssue,"Lot",v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Lot!FieldValTrim,"Bin",v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Bin!FieldValTrim,"Heat",v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Heat!FieldValTrim,"Serial",v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex).Serial_number!FieldValTrim,"WIPBin",v.Local.sRow(2))
+							
+							
+							'Get the amount currently in that WIP Bin
+							v.Local.sRet.Redim(0,0)
+							f.Intrinsic.String.Build("select qty_bin from v_wip_bin where job='{0}' and suffix='{1}' and sequence='{2}' and bin='{3}';", v.DataTable.testAleDT(v.Local.iCnt2).Job!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Seq!FieldVal, V.Local.sRow(2), v.Local.sSQL)
+							f.ODBC.Connection!Con.executeandreturn(v.Local.sSQL, v.Local.sRet)
+								
+							'Transfer to a WIP bin
+							f.Intrinsic.Control.If(v.Local.sRet,=,"")
+								f.Intrinsic.String.Build("Insert into WIP_Bin (Job,Suffix,Sequence,Part,Location,Bin,Description,Qty_Bin,Date_WipBin,Bin_User) values ('{0}','{1}','{2}','{3}','{4}','{5}','{6}','{7}','{8}','{9}')", v.DataTable.testAleDT(v.Local.iCnt2).Job!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Seq!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Part!FieldVal,"",V.Local.sRow(2) ,"WIP", v.Local.fQtyToIssue, v.Ambient.Date.FormatYYYYMMDD, v.Caller.User, v.Local.sSQL)	
+							f.Intrinsic.Control.Else
+								f.Intrinsic.String.Build("Update WIP_BIN set Qty_Bin = Qty_Bin + {3} where job='{0}' and suffix='{1}' and sequence='{2}'", v.DataTable.testAleDT(v.Local.iCnt2).Job!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Suffix!FieldVal, v.DataTable.testAleDT(v.Local.iCnt2).Seq!FieldVal, v.Local.fQtyToIssue, v.Local.sSQL)
+							f.Intrinsic.Control.EndIf
+							f.ODBC.Connection!Con.execute(v.Local.sSQL)
+							
+							'Decrement the qty available on the lot/bin record
+							f.Intrinsic.Math.Sub(v.datatable.dtItemMaster(v.DataView.dtItemMaster!dvItemMaster(v.local.iCnt3).datatableindex).Quantity!FieldVal,v.Local.fQtyToIssue,v.Local.fQtyIssued)
+							f.Data.DataTable.SetValue("dtItemMaster",v.DataView.dtItemMaster!dvItemMaster(v.Local.iCnt3).datatableindex, "Quantity",v.Local.fQtyIssued)
+							
+							'Decrement the qty on the JSS
+							f.Intrinsic.Math.Sub(v.DataTable.testAleDT(v.Local.iCnt2).QtyReq!FieldVal,v.Local.fQtyToIssue,v.Local.fQtyIssued)
+							f.Data.DataTable.SetValue("testAleDT", v.Local.iCnt2, "QtyReq", v.Local.fQtyIssued)
+						f.Intrinsic.Control.Next(v.Local.iCnt3)
+					f.Intrinsic.Control.Else
+						f.Data.DataTable.AddRow("dtResults","Job",v.Local.sRow(0), "Suffix", v.DataTable.testAleDT(v.Local.iCnt2).Suffix!fieldvaltrim, "Seq", v.DataTable.testAleDT(v.Local.iCnt2).Seq!fieldvaltrim, "Bin", v.Local.sRow(1), "WIPBin", v.Local.sRow(2), "Part", v.DataTable.testAleDT(v.Local.iCnt2).Part!fieldvaltrim, "Errors", "No matching PO lines found, or no qty received on the PO line")
+					f.Intrinsic.Control.EndIf
+				f.Intrinsic.Control.Next(v.Local.iCnt2)
+			f.Intrinsic.Control.Else
+				f.Data.DataTable.AddRow("dtResults","Job",v.Local.sRow(0), "Bin", v.Local.sRow(1), "WIPBin", v.Local.sRow(2), "Errors", "Job does not exist or is not open")
+			f.Intrinsic.Control.EndIf
+
+		f.Intrinsic.Control.Next(v.Local.iCnt)	
+				
+		f.Intrinsic.String.Build("Select Distinct Part from Item_Master where Part not in ({0}) and Bin = '{1}' and Quantity > 0 ", v.Local.sPartList, v.Local.sRow(1), v.Local.sSQL)
+		f.Data.Datatable.CreateFromSQL("newPart", "con", v.Local.sSQL)
+		f.Data.Datatable.AddColumn("newPart", "Errors", "string", "Part not moved to WIP Bin, due to lack of requirement.")
+		f.Data.Datatable.Merge("newPart", "dtResults", false, 2)
+		f.Data.Datatable.Close("newPart")
+
+		'Issue material callwrapper
+		f.Intrinsic.Control.If(v.DataTable.450100.RowCount,>,0)
+			f.Intrinsic.Control.CallSub(450100Sync)
+		f.Intrinsic.Control.EndIf
+		
+		'Display results
+		f.Data.DataTable.SaveToCSV("dtResults",v.Local.sReportFile,True)
+		f.Intrinsic.Task.ShellExec(handle,"open",v.Local.sReportFile,"","",0)
+
+	f.Intrinsic.Control.Catch
+		f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+	f.Intrinsic.Control.Finally
+		f.Automation.MSExcel.DestroyAllObjects("xlApp","xlWB","xlWS")
+		F.Intrinsic.Control.IF(V.ODBC.CON.STATE,=,1)
+			f.ODBC.Connection!con.Close
+		F.Intrinsic.Control.EndIf
+		f.Intrinsic.UI.CloseWaitDialog
+	f.Intrinsic.Control.EndTry
+Program.Sub.cmdProcess_Click.End
+
+Program.Sub.cmdBrowse_Click.Start
+	v.Local.sRet.Declare(String)
+	f.Intrinsic.Control.Try
+		f.Intrinsic.UI.ShowOpenFileDialog("","Excel Files|*.xls;*.xlsx|All Files|*.*","C:\",V.Local.sRet)
+		f.Intrinsic.Control.If(V.Local.sRet,<>,"***CANCEL***")
+			gui.Form.txtFilePath.Text(v.Local.sRet)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Catch
+		f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+	f.Intrinsic.Control.EndTry
+Program.Sub.cmdBrowse_Click.End
+
+Program.Sub.Form_UnLoad.Start
+	f.Intrinsic.Control.End
+Program.Sub.Form_UnLoad.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+
+'Closes ODBC connection, default to connection : "con"
+f.Intrinsic.Control.If(v.ODBC!con.State, =, 1)
+	f.ODBC.Connection!con.Close
+f.Intrinsic.Control.EndIf
+
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_5960_BulkIssueMaterial.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.Comments.Start
+${$5$}$3.0.0.0$}$1
+${$6$}$aanazco$}$20200630155603485$}$7aQAV3Tor/tR9bkuakHbuzQlHVuXCGOzJsh6m0Js0H5kvCN1fnBpzNt00uwQX8SktWYhPxzlYkw=
+Program.Sub.Comments.End
